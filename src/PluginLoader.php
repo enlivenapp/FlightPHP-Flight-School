@@ -30,6 +30,9 @@ class PluginLoader
     /** @var array<string, string> Base PSR-4 namespace per package name */
     protected array $pluginNamespaces = [];
 
+    /** @var ?string Package currently being loaded (set during register() calls) */
+    protected ?string $currentPackage = null;
+
     public function __construct(Engine $app, Router $router, string $vendorPath, array $enabledPlugins = [])
     {
         $this->app = $app;
@@ -72,7 +75,9 @@ class PluginLoader
                 $this->registerPluginViewPath($packageName);
                 $this->scanPluginPaths($packageName);
                 $config = $this->enabledPlugins[$packageName]['config'] ?? [];
+                $this->currentPackage = $packageName;
                 $plugin->register($this->app, $this->router, $config);
+                $this->currentPackage = null;
                 $this->loaded[$packageName] = $plugin;
             }
         }
@@ -170,46 +175,75 @@ class PluginLoader
     }
 
     /**
-     * Get src/{type} paths and namespaces across all loaded plugins.
-     * Standard directories are scanned automatically at load time.
-     * For nested paths (e.g. 'Migrations/2025-04-17'), this checks on demand.
+     * Get src/ paths and namespaces across all loaded plugins.
+     * With no argument, returns all types. With a type, returns only that bucket.
+     * Includes nested paths added via setPath().
      *
-     * @param string $type Directory name (e.g. 'Migrations', 'Seeds', 'Config')
-     * @return array<string, array{path: string, namespace: ?string}> Package name => path and namespace
+     * @param ?string $type Type bucket (e.g. 'Migrations', 'Seeds', 'Config') or null for all
+     * @return array<string, array<string, array{path: string, namespace: ?string}>> Type => [package => {path, namespace}]
      */
-    public function getPaths(string $type): array
+    public function getPaths(?string $type = null): array
     {
-        $rawPaths = [];
+        $types = $type !== null ? [$type] : array_keys($this->scannedPaths);
+        $output = [];
 
-        if (isset($this->scannedPaths[$type])) {
-            $rawPaths = $this->scannedPaths[$type];
-        } else {
-            // On-demand lookup for nested or custom paths
-            $ds = DIRECTORY_SEPARATOR;
+        foreach ($types as $t) {
+            $rawPaths = $this->scannedPaths[$t] ?? [];
 
-            foreach ($this->pluginRoots as $packageName => $root) {
-                if (!isset($this->loaded[$packageName])) {
-                    continue;
-                }
+            $entries = [];
+            foreach ($rawPaths as $packageName => $path) {
+                $baseNamespace = $this->pluginNamespaces[$packageName] ?? null;
+                $srcDir = $this->pluginRoots[$packageName] . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR;
+                $relativePath = str_replace($srcDir, '', $path);
+                $namespaceSuffix = str_replace(DIRECTORY_SEPARATOR, '\\', $relativePath);
 
-                $path = $root . $ds . 'src' . $ds . str_replace('/', $ds, $type);
+                $entries[$packageName] = [
+                    'path' => $path,
+                    'namespace' => $baseNamespace ? $baseNamespace . '\\' . $namespaceSuffix : null,
+                ];
+            }
 
-                if (is_dir($path)) {
-                    $rawPaths[$packageName] = $path;
-                }
+            if (!empty($entries)) {
+                $output[$t] = $entries;
             }
         }
 
-        $result = [];
-        foreach ($rawPaths as $packageName => $path) {
-            $baseNamespace = $this->pluginNamespaces[$packageName] ?? null;
-            $result[$packageName] = [
-                'path' => $path,
-                'namespace' => $baseNamespace ? $baseNamespace . '\\' . str_replace('/', '\\', $type) : null,
-            ];
+        return $output;
+    }
+
+    /**
+     * Register a nested src/ subdirectory under a type bucket.
+     * Call from within a plugin's register() method — the package is resolved automatically.
+     *
+     * @param string $type Type bucket to group under (e.g. 'Migrations')
+     * @param string $subdir Actual src/ subdirectory (e.g. 'Migrations/2026-04-17')
+     */
+    public function setPath(string $type, string $subdir): void
+    {
+        $packageName = $this->currentPackage;
+
+        if ($packageName === null || !isset($this->pluginRoots[$packageName])) {
+            return;
         }
 
-        return $result;
+        // Validate each segment is a valid PHP namespace identifier
+        $segments = preg_split('#[/\\\\]#', $subdir);
+        foreach ($segments as $segment) {
+            if (!preg_match('/^[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*$/', $segment)) {
+                error_log("Flight School: setPath() skipped '{$subdir}' in '{$packageName}' — "
+                    . "'{$segment}' is not a valid PHP namespace segment (no dashes or special characters).");
+                return;
+            }
+        }
+
+        $dir = $this->pluginRoots[$packageName] . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $subdir);
+
+        if (!is_dir($dir)) {
+            return;
+        }
+
+        $this->scannedPaths[$type][$packageName] = $dir;
+        $this->app->path($dir);
     }
 
     /**

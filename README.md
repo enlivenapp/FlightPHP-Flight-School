@@ -251,13 +251,23 @@ foreach ($app->pluginLoader()->getPaths('Migrations') as $package => $info) {
 }
 ```
 
-Nested paths work too but must be explicitly called, so plugins can organize files by version:
+Plugins can organize files into subdirectories and register them under a type bucket with `setPath()`. The current plugin is resolved automatically during `register()`:
 
 ```php
-$app->pluginLoader()->getPaths('Migrations/2026-04-17');
+// In your plugin's register() method
+$app->pluginLoader()->setPath('Migrations', 'Migrations/v1_0_2');
 ```
 
-This returns only the `src/Migrations/2026-04-17/` subdirectory from each plugin that has one, letting a runner target a specific version without processing everything before or after it.
+This registers `src/Migrations/v1_0_2/` under the `Migrations` bucket. A migration runner calling `getPaths('Migrations')` picks it up alongside every other plugin's migrations.
+
+Subdirectory names must be valid PHP namespace segments — letters, numbers, and underscores only. Dashes and special characters are not allowed because directories map directly to namespaces. For example, `Migrations/v1_0_2` works but `Migrations/2026-04-17` does not. Invalid names are logged and skipped.
+
+Call `getPaths()` with no argument to get everything, or pass a type to filter:
+
+```php
+$app->pluginLoader()->getPaths();            // all types
+$app->pluginLoader()->getPaths('Migrations'); // only migrations
+```
 
 **Note:** `Commands/` and `Views/` are special cases — Commands are auto-discovered by Runway, and Views are handled by the view override system. Neither needs `getPaths()`.
 
