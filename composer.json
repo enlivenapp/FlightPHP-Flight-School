@@ -1,6 +1,6 @@
 {
     "name": "enlivenapp/flight-school",
-    "description": "Plugin loader and discovery for FlightPHP applications",
+    "description": "Plugin loader and discovery for FlightPHP plugins",
     "type": "composer-plugin",
     "license": "MIT",
     "authors": [
@@ -12,7 +12,8 @@
     "require": {
         "php": "^8.1",
         "composer-plugin-api": "^2.0",
-        "flightphp/core": "^3.0"
+        "flightphp/core": "^3.0",
+        "flightphp/runway": "^1.1"
     },
     "autoload": {
         "psr-4": {

@@ -11,6 +11,8 @@ Plugin architecture for FlightPHP. Discovers, loads, and manages plugins from Co
 composer create-project flightphp/skeleton my-project
 cd my-project
 ```
+or `composer create-project flightphp/skeleton .` to install in the same directory.
+
 
 ## Installation
 
@@ -19,6 +21,9 @@ composer require enlivenapp/flight-school
 ```
 
 Composer will ask you to trust the plugin — type `yes`. This allows Flight School to set up your project:
+
+> *We recommend always reviewing someone elses' code before installing it*
+
 
 1. Adds the plugin loader service to `app/config/services.php`
 2. Adds a `plugins` section to `app/config/config.php` and `config_sample.php`
