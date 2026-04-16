@@ -30,6 +30,9 @@ class PluginLoader
     /** @var array<string, string> Base PSR-4 namespace per package name */
     protected array $pluginNamespaces = [];
 
+    /** @var array<string, array> Config arrays loaded from each plugin's Config/Config.php */
+    protected array $pluginConfigs = [];
+
     /** @var ?string Package currently being loaded (set during register() calls) */
     protected ?string $currentPackage = null;
 
@@ -65,21 +68,26 @@ class PluginLoader
         uasort($prioritized, fn($a, $b) => $a['priority'] <=> $b['priority']);
 
         foreach ($prioritized as $packageName => $info) {
-            if ($this->isEnabled($packageName) && class_exists($info['class'])) {
-                if (!is_a($info['class'], PluginInterface::class, true)) {
-                    continue;
-                }
-
-                $plugin = new $info['class']();
-                $this->resolvePluginRoot($packageName);
-                $this->registerPluginViewPath($packageName);
-                $this->scanPluginPaths($packageName);
-                $config = $this->enabledPlugins[$packageName]['config'] ?? [];
-                $this->currentPackage = $packageName;
-                $plugin->register($this->app, $this->router, $config);
-                $this->currentPackage = null;
-                $this->loaded[$packageName] = $plugin;
+            if (!$this->isEnabled($packageName)) {
+                continue;
             }
+
+            $this->resolvePluginRoot($packageName);
+            $this->registerPluginViewPath($packageName);
+            $this->currentPackage = $packageName;
+            $this->scanPluginPaths($packageName);
+
+            // Plugin.php is optional. If it exists and implements
+            // PluginInterface, call register() for any custom setup.
+            $plugin = null;
+            if (class_exists($info['class']) && is_a($info['class'], PluginInterface::class, true)) {
+                $plugin = new $info['class']();
+                $config = $this->pluginConfigs[$packageName] ?? [];
+                $plugin->register($this->app, $this->router, $config);
+            }
+
+            $this->currentPackage = null;
+            $this->loaded[$packageName] = $plugin;
         }
 
         return $this->loaded;
@@ -149,6 +157,10 @@ class PluginLoader
 
     /**
      * Scan a plugin's src/ directory, store paths, and register with the engine.
+     *
+     * When the Config/ directory is found, its files are loaded in the same
+     * order the main app boots: Config.php first, Services.php second,
+     * Routes.php third, then any remaining .php files.
      */
     protected function scanPluginPaths(string $packageName): void
     {
@@ -171,7 +183,92 @@ class PluginLoader
 
             $this->scannedPaths[$type][$packageName] = $dir;
             $this->app->path($dir);
+
+            if ($type === 'Config') {
+                $this->loadConfigDir($packageName, $dir);
+            }
         }
+    }
+
+    /**
+     * Load files from a plugin's Config/ directory in bootstrap order:
+     * Config.php first, Routes.php second, then any remaining .php
+     * files alphabetically. Services.php is intentionally skipped —
+     * services use Composer autoloading and don't need registration.
+     *
+     * Config.php may set $configPrepend and $routePrepend to override
+     * the default collision-avoidance prefixes. If not set, defaults
+     * are derived from the package name:
+     *   - Config: vendor.package-name (e.g. enlivenapp.hello-world-plugin)
+     *   - Routes: vendor_package_name (e.g. enlivenapp_hello_world_plugin)
+     *
+     * Config.php should return an array. The PluginLoader stores it
+     * on $app under the config prepend key automatically.
+     *
+     * Routes.php is automatically wrapped in a $router->group() using
+     * the route prepend, so plugins don't need their own group wrapper.
+     * $configPrepend is available inside Routes.php for config lookups.
+     */
+    protected function loadConfigDir(string $packageName, string $dir): void
+    {
+        $app = $this->app;
+        $router = $this->router;
+        $config = [];
+        $configPrepend = null;
+        $routePrepend = null;
+
+        // 1. Config — read config values and optional prepend overrides
+        $configFile = $dir . DIRECTORY_SEPARATOR . 'Config.php';
+        if (file_exists($configFile)) {
+            $result = require $configFile;
+            if (is_array($result)) {
+                $config = $result;
+            }
+        }
+
+        // Apply defaults if plugin didn't set overrides
+        $configPrepend = $configPrepend ?? $this->deriveConfigPrepend($packageName);
+        $routePrepend = $routePrepend ?? $this->deriveRoutePrepend($packageName);
+
+        // Store config on $app under the prefixed key
+        if (!empty($config)) {
+            $app->set($configPrepend, $config);
+        }
+        $this->pluginConfigs[$packageName] = $config;
+
+        // 2. Routes — auto-wrapped in prefix group
+        $routesFile = $dir . DIRECTORY_SEPARATOR . 'Routes.php';
+        if (file_exists($routesFile)) {
+            $router->group('/' . $routePrepend, function (Router $router) use ($app, $routesFile, $configPrepend) {
+                require $routesFile;
+            });
+        }
+
+        // 3. Everything else (Services.php intentionally skipped)
+        $handled = ['Config.php', 'Services.php', 'Routes.php'];
+        foreach (glob($dir . DIRECTORY_SEPARATOR . '*.php') as $file) {
+            if (!in_array(basename($file), $handled, true)) {
+                require $file;
+            }
+        }
+    }
+
+    /**
+     * Derive the default config prepend from a package name.
+     * enlivenapp/hello-world-plugin → enlivenapp.hello-world-plugin
+     */
+    protected function deriveConfigPrepend(string $packageName): string
+    {
+        return str_replace('/', '.', $packageName);
+    }
+
+    /**
+     * Derive the default route prepend from a package name.
+     * enlivenapp/hello-world-plugin → enlivenapp_hello_world_plugin
+     */
+    protected function deriveRoutePrepend(string $packageName): string
+    {
+        return str_replace(['/', '-'], '_', $packageName);
     }
 
     /**

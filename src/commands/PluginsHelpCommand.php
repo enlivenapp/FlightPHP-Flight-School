@@ -29,6 +29,7 @@ class PluginsHelpCommand extends AbstractBaseCommand
         $io->bold('Available Commands:', true);
         $io->write('', true);
         $io->write('  plugins:list                List all discovered plugins with status, source, and priority', true);
+        $io->write('  plugins:info <name> <opt>   Show plugin details (routes, config, classes, paths, composer-info)', true);
         $io->write('  plugins:sync                Scan for new plugins and add missing entries to config.php', true);
         $io->write('  plugins:enable <name>       Enable a plugin (e.g. plugins:enable enlivenapp/hello)', true);
         $io->write('  plugins:disable <name>      Disable a plugin (e.g. plugins:disable enlivenapp/hello)', true);
