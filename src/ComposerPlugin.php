@@ -93,7 +93,8 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
                 continue;
             }
 
-            $this->lockedFileUpdate($file, function ($contents) use ($packageName) {
+            $io = $this->io;
+            $this->lockedFileUpdate($file, function ($contents) use ($packageName, $filename, $io) {
                 if (str_contains($contents, "'" . $packageName . "'")) {
                     return $contents;
                 }
@@ -103,20 +104,68 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
                        . "\t\t\t'config' => [],\n"
                        . "\t\t],";
 
-                $pattern = "/('plugins'\s*=>\s*\[)(.*?)(\n\t\])/s";
-
-                if (preg_match($pattern, $contents, $matches, PREG_OFFSET_CAPTURE)) {
-                    $insertPos = $matches[3][1];
-                    return substr($contents, 0, $insertPos)
-                        . "\n" . $entry
-                        . substr($contents, $insertPos);
+                // Find the 'plugins' => [ block
+                $pluginsPos = strpos($contents, "'plugins'");
+                if ($pluginsPos === false) {
+                    $io->write("<warning>  Could not find 'plugins' array in app/config/{$filename}.</warning>");
+                    $io->write("<warning>  Please add the following to your 'plugins' array:</warning>");
+                    $io->write($entry);
+                    return $contents;
                 }
 
-                return $contents;
+                // Find the opening [ after 'plugins'
+                $openBracket = strpos($contents, '[', $pluginsPos);
+                if ($openBracket === false) {
+                    $io->write("<warning>  Could not find 'plugins' array in app/config/{$filename}.</warning>");
+                    $io->write("<warning>  Please add the following to your 'plugins' array:</warning>");
+                    $io->write($entry);
+                    return $contents;
+                }
+
+                // Count brackets to find the matching ]
+                $depth = 0;
+                $closePos = false;
+                for ($i = $openBracket; $i < strlen($contents); $i++) {
+                    if ($contents[$i] === '[') {
+                        $depth++;
+                    } elseif ($contents[$i] === ']') {
+                        $depth--;
+                        if ($depth === 0) {
+                            $closePos = $i;
+                            break;
+                        }
+                    }
+                }
+
+                if ($closePos === false) {
+                    $io->write("<warning>  Could not find closing bracket for 'plugins' array in app/config/{$filename}.</warning>");
+                    $io->write("<warning>  Please add the following to your 'plugins' array:</warning>");
+                    $io->write($entry);
+                    return $contents;
+                }
+
+                // Walk backward inside the plugins array, skip blanks and comments, add comma if needed
+                $inside = substr($contents, $openBracket + 1, $closePos - $openBracket - 1);
+                $lines = explode("\n", $inside);
+
+                for ($i = count($lines) - 1; $i >= 0; $i--) {
+                    $trimmed = trim($lines[$i]);
+                    if ($trimmed === '' || str_starts_with($trimmed, '//')) {
+                        continue;
+                    }
+                    if (!str_ends_with($trimmed, ',')) {
+                        $lines[$i] .= ',';
+                    }
+                    break;
+                }
+
+                $io->write("<info>  Plugin '{$packageName}' added to {$filename} (disabled). Enable it in config.php.</info>");
+
+                return substr($contents, 0, $openBracket + 1)
+                    . implode("\n", $lines) . "\n" . $entry . "\n"
+                    . substr($contents, $closePos);
             });
         }
-
-        $this->io->write("<info>  Plugin '{$packageName}' added to config (disabled). Enable it in config.php.</info>");
     }
 
     protected function installServices(string $projectRoot): void
@@ -163,13 +212,13 @@ PHP;
             }
 
             if (str_contains($contents, $marker)) {
+                $io->write('  Added plugin loader to services.php');
                 return str_replace($marker, $block . "\n\n" . $marker, $contents);
             }
 
+            $io->write('  Added plugin loader to services.php');
             return $contents . "\n" . $block . "\n";
         });
-
-        $this->io->write('  Added plugin loader to services.php');
     }
 
     protected function installPluginsSection(string $projectRoot, string $filename): void
@@ -202,25 +251,35 @@ PHP;
                 return $contents;
             }
 
-            $pattern = '/(\])(\s*)(\/\/[^\n]*\n\s*)?\];/s';
-
-            if (preg_match($pattern, $contents, $matches, PREG_OFFSET_CAPTURE)) {
-                $lastBracketPos = $matches[1][1];
-
-                $afterBracket = substr($contents, $lastBracketPos + 1);
-                $needsComma = !preg_match('/^\s*,/', $afterBracket);
-
-                $insertion = ($needsComma ? ',' : '') . "\n" . $pluginsBlock . "\n";
-
-                return substr($contents, 0, $lastBracketPos + 1)
-                    . $insertion
-                    . substr($contents, $lastBracketPos + 1);
+            // Find the final ]; (end of return array)
+            $endPos = strrpos($contents, '];');
+            if ($endPos === false) {
+                $io->write("<warning>  Could not automatically add plugins config to {$filename}.</warning>");
+                $io->write("<warning>  Please add the following to your return array in app/config/{$filename}:</warning>");
+                $io->write($pluginsBlock);
+                return $contents;
             }
 
-            return $contents;
-        });
+            // Split everything before ]; into lines
+            $before = substr($contents, 0, $endPos);
+            $lines = explode("\n", $before);
 
-        $io->write("  Added plugins config to {$filename}");
+            // Walk backward, skip blank and comment lines, add trailing comma if needed
+            for ($i = count($lines) - 1; $i >= 0; $i--) {
+                $trimmed = trim($lines[$i]);
+                if ($trimmed === '' || str_starts_with($trimmed, '//')) {
+                    continue;
+                }
+                if (!str_ends_with($trimmed, ',')) {
+                    $lines[$i] .= ',';
+                }
+                break;
+            }
+
+            $io->write("  Added plugins config to {$filename}");
+
+            return implode("\n", $lines) . "\n" . $pluginsBlock . "\n" . substr($contents, $endPos);
+        });
     }
 
     /**

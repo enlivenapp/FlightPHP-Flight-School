@@ -54,6 +54,17 @@ class PluginsSyncCommand extends AbstractBaseCommand
                     return $contents;
                 }
 
+                // Find the 'plugins' => [ block
+                $pluginsPos = strpos($contents, "'plugins'");
+                if ($pluginsPos === false) {
+                    return $contents;
+                }
+
+                $openBracket = strpos($contents, '[', $pluginsPos);
+                if ($openBracket === false) {
+                    return $contents;
+                }
+
                 foreach ($allDiscovered as $packageName => $source) {
                     if (str_contains($contents, "'" . $packageName . "'")) {
                         continue;
@@ -64,18 +75,48 @@ class PluginsSyncCommand extends AbstractBaseCommand
                            . "\t\t\t'config' => [],\n"
                            . "\t\t],";
 
-                    $pattern = "/('plugins'\s*=>\s*\[)(.*?)(\n\t\])/s";
-
-                    if (preg_match($pattern, $contents, $matches, \PREG_OFFSET_CAPTURE)) {
-                        $insertPos = $matches[3][1];
-                        $contents = substr($contents, 0, $insertPos)
-                            . "\n" . $entry
-                            . substr($contents, $insertPos);
-
-                        if ($filename === 'config.php') {
-                            $added++;
-                            $io->ok("  Added '{$packageName}' to {$filename} (disabled)", true);
+                    // Count brackets to find the matching ]
+                    $depth = 0;
+                    $closePos = false;
+                    for ($i = $openBracket; $i < strlen($contents); $i++) {
+                        if ($contents[$i] === '[') {
+                            $depth++;
+                        } elseif ($contents[$i] === ']') {
+                            $depth--;
+                            if ($depth === 0) {
+                                $closePos = $i;
+                                break;
+                            }
                         }
+                    }
+
+                    if ($closePos === false) {
+                        $io->warn("  Could not find closing bracket for 'plugins' array in {$filename}.", true);
+                        return $contents;
+                    }
+
+                    // Walk backward inside the plugins array, skip blanks and comments, add comma if needed
+                    $inside = substr($contents, $openBracket + 1, $closePos - $openBracket - 1);
+                    $lines = explode("\n", $inside);
+
+                    for ($j = count($lines) - 1; $j >= 0; $j--) {
+                        $trimmed = trim($lines[$j]);
+                        if ($trimmed === '' || str_starts_with($trimmed, '//')) {
+                            continue;
+                        }
+                        if (!str_ends_with($trimmed, ',')) {
+                            $lines[$j] .= ',';
+                        }
+                        break;
+                    }
+
+                    $contents = substr($contents, 0, $openBracket + 1)
+                        . implode("\n", $lines) . "\n" . $entry . "\n"
+                        . substr($contents, $closePos);
+
+                    if ($filename === 'config.php') {
+                        $added++;
+                        $io->ok("  Added '{$packageName}' to {$filename} (disabled)", true);
                     }
                 }
 
