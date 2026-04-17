@@ -1,6 +1,9 @@
 <?php
 
 /**
+ * Display usage and available commands for the plugin system.
+ *
+ * @package   Enlivenapp\FlightSchool\Commands
  * @copyright 2026 enlivenapp
  * @license   MIT
  */
@@ -13,11 +16,19 @@ use flight\commands\AbstractBaseCommand;
 
 class PluginsHelpCommand extends AbstractBaseCommand
 {
+    /**
+     * @param array $config Runway config.
+     */
     public function __construct(array $config)
     {
         parent::__construct('plugins:help', 'Show Flight School plugin system usage and commands', $config);
     }
 
+    /**
+     * Print the help text.
+     *
+     * @return void
+     */
     public function execute(): void
     {
         $io = $this->app()->io();

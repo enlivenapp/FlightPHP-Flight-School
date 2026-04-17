@@ -16,7 +16,7 @@ use flight\template\View;
  *
  * Resolution order for a template like 'enlivenapp/flight-blog/post':
  *   1. app/views/enlivenapp/flight-blog/post.php  (user override)
- *   2. vendor/enlivenapp/flight-blog/src/views/post.php  (plugin default)
+ *   2. vendor/enlivenapp/flight-blog/src/Views/post.php  (plugin default)
  */
 class PluginView extends View
 {

@@ -1,6 +1,11 @@
 <?php
 
 /**
+ * Show detailed information about a plugin.
+ *
+ * Supports composer-info, routes, config, classes, and paths views.
+ *
+ * @package   Enlivenapp\FlightSchool\Commands
  * @copyright 2026 enlivenapp
  * @license   MIT
  */
@@ -16,6 +21,9 @@ class PluginsInfoCommand extends AbstractBaseCommand
 {
     use PluginDiscoveryTrait;
 
+    /**
+     * @param array $config Runway config.
+     */
     public function __construct(array $config)
     {
         parent::__construct('plugins:info', 'Show information about a plugin', $config);
@@ -24,6 +32,14 @@ class PluginsInfoCommand extends AbstractBaseCommand
         $this->argument('[modifier]', 'Use "all" for full details (routes and config only)');
     }
 
+    /**
+     * Display the requested info view for a plugin.
+     *
+     * @param string|null $plugin   Package name.
+     * @param string|null $option   Info type to display.
+     * @param string|null $modifier Optional 'all' for full details.
+     * @return void
+     */
     public function execute(?string $plugin = null, ?string $option = null, ?string $modifier = null): void
     {
         $io = $this->app()->io();
@@ -119,20 +135,20 @@ class PluginsInfoCommand extends AbstractBaseCommand
 
     protected function showRoutes($io, string $plugin, string $pluginRoot, bool $showAll): void
     {
-        $prepends = $this->readPrepends($plugin, $pluginRoot);
-        $routePrepend = $prepends['route'];
+        $result = $this->readPrepends($plugin, $pluginRoot);
+        $PluginPrefix = $result['PluginPrefix'];
 
         $io->write('', true);
 
         if (!$showAll) {
             $io->bold('Route prefix:', true);
-            $io->write("  /{$routePrepend}", true);
+            $io->write("  /{$PluginPrefix['route']}", true);
             $io->write('', true);
             return;
         }
 
         $io->bold('Routes:', true);
-        $io->write("  Prefix: /{$routePrepend}", true);
+        $io->write("  Prefix: /{$PluginPrefix['route']}", true);
         $io->write('', true);
 
         $routesFile = $pluginRoot . '/src/Config/Routes.php';
@@ -150,7 +166,7 @@ class PluginsInfoCommand extends AbstractBaseCommand
             foreach ($matches as $match) {
                 $method = strtoupper($match[1]);
                 $path = $match[2];
-                $fullPath = '/' . $routePrepend . ($path === '/' ? '' : $path);
+                $fullPath = '/' . $PluginPrefix['route'] . ($path === '/' ? '' : $path);
                 $io->write('  ' . str_pad($method, 8) . $fullPath, true);
             }
         } else {
@@ -162,23 +178,23 @@ class PluginsInfoCommand extends AbstractBaseCommand
 
     protected function showConfig($io, string $plugin, string $pluginRoot, bool $showAll): void
     {
-        $prepends = $this->readPrepends($plugin, $pluginRoot);
-        $configPrepend = $prepends['config'];
+        $result = $this->readPrepends($plugin, $pluginRoot);
+        $PluginPrefix = $result['PluginPrefix'];
 
         $io->write('', true);
 
         if (!$showAll) {
             $io->bold('Config prefix:', true);
-            $io->write("  {$configPrepend}", true);
+            $io->write("  {$PluginPrefix['config']}", true);
             $io->write('', true);
             return;
         }
 
         $io->bold('Config:', true);
-        $io->write("  Prefix: {$configPrepend}", true);
+        $io->write("  Prefix: {$PluginPrefix['config']}", true);
         $io->write('', true);
 
-        $configData = $prepends['data'];
+        $configData = $result['data'];
         if (empty($configData)) {
             $io->info('  No config values.', true);
             $io->write('', true);
@@ -296,33 +312,36 @@ class PluginsInfoCommand extends AbstractBaseCommand
     /**
      * Read Config.php to get prepend overrides and config data.
      *
-     * Config.php may set $configPrepend and $routePrepend as local variables.
-     * We require it in a method scope so those variables are accessible after.
+     * Config.php may set $configPrepend and $routePrepend as bare
+     * variables. If not set, defaults are derived from the package name.
+     *
+     * @param string $plugin     Package name (e.g. 'enlivenapp/hello-world-plugin').
+     * @param string $pluginRoot Absolute path to the plugin's root directory.
+     * @return array{PluginPrefix: array{config: string, route: string}, data: array}
      */
     protected function readPrepends(string $plugin, string $pluginRoot): array
     {
         $configFile = $pluginRoot . '/src/Config/Config.php';
-
+        $data = [];
         $configPrepend = null;
         $routePrepend = null;
-        $data = [];
 
         if (file_exists($configFile)) {
-            $app = null;
-            $router = null;
             $result = require $configFile;
             if (is_array($result)) {
                 $data = $result;
             }
         }
 
-        // Apply defaults if plugin didn't set overrides
+        // Apply defaults if Config.php didn't set overrides
         $configPrepend = $configPrepend ?? str_replace('/', '.', $plugin);
         $routePrepend = $routePrepend ?? str_replace(['/', '-'], '_', $plugin);
 
         return [
-            'config' => $configPrepend,
-            'route' => $routePrepend,
+            'PluginPrefix' => [
+                'config' => $configPrepend,
+                'route' => $routePrepend,
+            ],
             'data' => $data,
         ];
     }

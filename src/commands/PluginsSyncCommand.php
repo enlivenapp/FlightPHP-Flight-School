@@ -1,6 +1,9 @@
 <?php
 
 /**
+ * Scan for new plugins and add missing entries to config.php.
+ *
+ * @package   Enlivenapp\FlightSchool\Commands
  * @copyright 2026 enlivenapp
  * @license   MIT
  */
@@ -16,11 +19,19 @@ class PluginsSyncCommand extends AbstractBaseCommand
 {
     use PluginDiscoveryTrait;
 
+    /**
+     * @param array $config Runway config.
+     */
     public function __construct(array $config)
     {
         parent::__construct('plugins:sync', 'Discover plugins and add missing entries to config.php', $config);
     }
 
+    /**
+     * Discover plugins and add missing config entries.
+     *
+     * @return void
+     */
     public function execute(): void
     {
         $io = $this->app()->io();
@@ -72,7 +83,7 @@ class PluginsSyncCommand extends AbstractBaseCommand
 
                     $entry = "\t\t'" . $packageName . "' => [\n"
                            . "\t\t\t'enabled' => false,\n"
-                           . "\t\t\t'config' => [],\n"
+                           . "\t\t\t'priority' => 50,\n"
                            . "\t\t],";
 
                     // Count brackets to find the matching ]

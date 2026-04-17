@@ -1,6 +1,13 @@
 <?php
 
 /**
+ * Discovers, configures, and loads Flight School plugins.
+ *
+ * Reads Composer's installed.json for packages with a type starting
+ * with "flightphp-", loads their Config/ files, registers routes,
+ * and calls Plugin::register() if present.
+ *
+ * @package   Enlivenapp\FlightSchool
  * @copyright 2026 enlivenapp
  * @license   MIT
  */
@@ -36,6 +43,12 @@ class PluginLoader
     /** @var ?string Package currently being loaded (set during register() calls) */
     protected ?string $currentPackage = null;
 
+    /**
+     * @param Engine $app            The FlightPHP app instance.
+     * @param Router $router         The FlightPHP router.
+     * @param string $vendorPath     Absolute path to the vendor/ directory.
+     * @param array  $enabledPlugins Plugin settings from app/config/config.php.
+     */
     public function __construct(Engine $app, Router $router, string $vendorPath, array $enabledPlugins = [])
     {
         $this->app = $app;
@@ -94,7 +107,10 @@ class PluginLoader
     }
 
     /**
-     * Replace Flight's default View with PluginView to support plugin view resolution.
+     * Replace Flight's default View with PluginView to support
+     * plugin view resolution with app-level overrides.
+     *
+     * @return void
      */
     protected function initPluginView(): void
     {
@@ -114,6 +130,9 @@ class PluginLoader
     /**
      * Resolve and store the root path for a vendor plugin.
      * Rejects symlinks and paths that resolve outside the project root.
+     *
+     * @param string $packageName Composer package name (e.g. 'enlivenapp/hello-world-plugin').
+     * @return void
      */
     protected function resolvePluginRoot(string $packageName): void
     {
@@ -126,6 +145,9 @@ class PluginLoader
 
     /**
      * Check that a resolved path stays within the project root.
+     *
+     * @param string $path Absolute filesystem path to validate.
+     * @return bool
      */
     protected function isWithinProjectRoot(string $path): bool
     {
@@ -140,7 +162,10 @@ class PluginLoader
     }
 
     /**
-     * Register a plugin's src/views/ directory for view resolution.
+     * Register a plugin's src/Views/ directory for view resolution.
+     *
+     * @param string $packageName Composer package name.
+     * @return void
      */
     protected function registerPluginViewPath(string $packageName): void
     {
@@ -156,11 +181,12 @@ class PluginLoader
     }
 
     /**
-     * Scan a plugin's src/ directory, store paths, and register with the engine.
+     * Scan a plugin's src/ directory, store paths, and register
+     * with the engine. When Config/ is found, its files are loaded
+     * via loadConfigDir().
      *
-     * When the Config/ directory is found, its files are loaded in the same
-     * order the main app boots: Config.php first, Services.php second,
-     * Routes.php third, then any remaining .php files.
+     * @param string $packageName Composer package name.
+     * @return void
      */
     protected function scanPluginPaths(string $packageName): void
     {
@@ -203,11 +229,17 @@ class PluginLoader
      *   - Routes: vendor_package_name (e.g. enlivenapp_hello_world_plugin)
      *
      * Config.php should return an array. The PluginLoader stores it
-     * on $app under the config prepend key automatically.
+     * on $app under the config prepend key automatically. Values set
+     * via $app->set() directly in Config.php are NOT prefixed — they
+     * go into $app exactly as written.
      *
      * Routes.php is automatically wrapped in a $router->group() using
      * the route prepend, so plugins don't need their own group wrapper.
      * $configPrepend is available inside Routes.php for config lookups.
+     *
+     * @param string $packageName Composer package name.
+     * @param string $dir         Absolute path to the plugin's Config/ directory.
+     * @return void
      */
     protected function loadConfigDir(string $packageName, string $dir): void
     {
@@ -256,6 +288,9 @@ class PluginLoader
     /**
      * Derive the default config prepend from a package name.
      * enlivenapp/hello-world-plugin → enlivenapp.hello-world-plugin
+     *
+     * @param string $packageName Composer package name.
+     * @return string
      */
     protected function deriveConfigPrepend(string $packageName): string
     {
@@ -265,6 +300,9 @@ class PluginLoader
     /**
      * Derive the default route prepend from a package name.
      * enlivenapp/hello-world-plugin → enlivenapp_hello_world_plugin
+     *
+     * @param string $packageName Composer package name.
+     * @return string
      */
     protected function deriveRoutePrepend(string $packageName): string
     {
@@ -425,6 +463,12 @@ class PluginLoader
         return $this->loaded;
     }
 
+    /**
+     * Check if a plugin is enabled in the app config.
+     *
+     * @param string $packageName Composer package name.
+     * @return bool
+     */
     protected function isEnabled(string $packageName): bool
     {
         $settings = $this->enabledPlugins[$packageName] ?? [];
@@ -433,6 +477,9 @@ class PluginLoader
 
     /**
      * Resolve the Plugin class FQCN from a package's PSR-4 autoload config.
+     *
+     * @param array $package Composer package data from installed.json.
+     * @return string|null Fully qualified class name, or null if no autoload.
      */
     protected function resolvePluginClass(array $package): ?string
     {

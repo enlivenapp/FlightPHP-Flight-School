@@ -1,6 +1,13 @@
 <?php
 
 /**
+ * Composer plugin that wires Flight School into a FlightPHP project.
+ *
+ * On install of flight-school: adds the plugin loader service and a
+ * plugins section to the app config. On install of any flightphp-*
+ * package: adds a disabled config entry for the new plugin.
+ *
+ * @package   Enlivenapp\FlightSchool
  * @copyright 2026 enlivenapp
  * @license   MIT
  */
@@ -21,20 +28,32 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
     protected Composer $composer;
     protected IOInterface $io;
 
+    /**
+     * @param Composer    $composer The Composer instance.
+     * @param IOInterface $io       Composer's I/O interface.
+     * @return void
+     */
     public function activate(Composer $composer, IOInterface $io): void
     {
         $this->composer = $composer;
         $this->io = $io;
     }
 
+    /** @return void */
     public function deactivate(Composer $composer, IOInterface $io): void
     {
     }
 
+    /** @return void */
     public function uninstall(Composer $composer, IOInterface $io): void
     {
     }
 
+    /**
+     * Subscribe to post-package-install events.
+     *
+     * @return array<string, string>
+     */
     public static function getSubscribedEvents(): array
     {
         return [
@@ -42,6 +61,12 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
         ];
     }
 
+    /**
+     * Handle post-install: set up flight-school or add config for new plugins.
+     *
+     * @param PackageEvent $event The Composer package event.
+     * @return void
+     */
     public function onPostPackageInstall(PackageEvent $event): void
     {
         $package = $event->getOperation()->getPackage();
@@ -72,6 +97,9 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
 
     /**
      * Check that the FlightPHP skeleton structure exists.
+     *
+     * @param string $projectRoot Absolute path to the project root.
+     * @return bool
      */
     protected function isFlightSkeleton(string $projectRoot): bool
     {
@@ -83,6 +111,14 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
 
     /**
      * Add a disabled config entry for a newly installed plugin.
+     *
+     * Only writes 'enabled' and 'priority'. Config values live in
+     * the plugin's own src/Config/Config.php — the PluginLoader reads
+     * those at runtime.
+     *
+     * @param string $projectRoot Absolute path to the project root.
+     * @param string $packageName Composer package name.
+     * @return void
      */
     protected function addPluginConfigEntry(string $projectRoot, string $packageName): void
     {
@@ -101,7 +137,7 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
 
                 $entry = "\t\t'" . $packageName . "' => [\n"
                        . "\t\t\t'enabled' => false,\n"
-                       . "\t\t\t'config' => [],\n"
+                       . "\t\t\t'priority' => 50,\n"
                        . "\t\t],";
 
                 // Find the 'plugins' => [ block
@@ -168,6 +204,12 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
         }
     }
 
+    /**
+     * Add the plugin loader service registration to services.php.
+     *
+     * @param string $projectRoot Absolute path to the project root.
+     * @return void
+     */
     protected function installServices(string $projectRoot): void
     {
         $file = $projectRoot . '/app/config/services.php';
@@ -221,6 +263,13 @@ PHP;
         });
     }
 
+    /**
+     * Add a 'plugins' section to a config file if one doesn't exist.
+     *
+     * @param string $projectRoot Absolute path to the project root.
+     * @param string $filename    Config filename (e.g. 'config.php').
+     * @return void
+     */
     protected function installPluginsSection(string $projectRoot, string $filename): void
     {
         $file = $projectRoot . '/app/config/' . $filename;
@@ -238,7 +287,6 @@ PHP;
 		// 'enlivenapp/flight-blog' => [
 		//     'enabled' => true,
 		//     'priority' => 10,
-		//     'config' => [],
 		// ],
 	],
 PHP;
@@ -284,6 +332,10 @@ PHP;
 
     /**
      * Atomically read, modify, and write a file under an exclusive lock.
+     *
+     * @param string   $file     Absolute path to the file.
+     * @param callable $modifier Receives file contents, returns modified contents.
+     * @return bool
      */
     protected function lockedFileUpdate(string $file, callable $modifier): bool
     {

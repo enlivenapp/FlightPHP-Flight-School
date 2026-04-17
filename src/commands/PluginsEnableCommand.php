@@ -1,6 +1,9 @@
 <?php
 
 /**
+ * Enable a plugin by setting 'enabled' => true in config.php.
+ *
+ * @package   Enlivenapp\FlightSchool\Commands
  * @copyright 2026 enlivenapp
  * @license   MIT
  */
@@ -16,12 +19,21 @@ class PluginsEnableCommand extends AbstractBaseCommand
 {
     use PluginDiscoveryTrait;
 
+    /**
+     * @param array $config Runway config.
+     */
     public function __construct(array $config)
     {
         parent::__construct('plugins:enable', 'Enable a plugin in config.php', $config);
         $this->argument('[plugin]', 'Plugin name (e.g. enlivenapp/hello)');
     }
 
+    /**
+     * Enable the specified plugin.
+     *
+     * @param string|null $plugin Package name to enable.
+     * @return void
+     */
     public function execute(?string $plugin = null): void
     {
         $io = $this->app()->io();

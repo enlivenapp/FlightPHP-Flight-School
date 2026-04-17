@@ -47,18 +47,7 @@ Plugins are disabled by default. Enable them in `config.php` by setting `'enable
 
 A plugin is a Composer package with files in `src/Config/`. The PluginLoader loads them automatically.
 
-**src/Config/Config.php** returns config values. The PluginLoader stores the returned array on `$app` with a prefix based on the package name, so two plugins can't overwrite each other's config:
-
-```php
-<?php
-return [
-    'posts_per_page' => 15,
-];
-```
-
-For `myvendor/my-plugin`, the config is stored as `myvendor.my-plugin`. Read it with `$app->get('myvendor.my-plugin')`.
-
-You can set a shorter prefix by adding `$configPrepend` (and `$routePrepend` for routes) in Config.php:
+**src/Config/Config.php** sets prefixes and returns config values. The PluginLoader stores the returned array on `$app` with the prefix applied, so two plugins can't overwrite each other's config:
 
 ```php
 <?php
@@ -70,10 +59,12 @@ return [
 ];
 ```
 
-Now it's `$app->get('blog')` instead. If you don't set these, the defaults are:
+With the overrides above, config is stored as `blog` — read it with `$app->get('blog')`. If you don't set the prepends, defaults are derived from the package name:
 
 - **Config:** `myvendor.my-plugin` (dot-separated package name)
 - **Routes:** `myvendor_my_plugin` (underscored package name)
+
+`$app` is available in Config.php, so you can also call `$app->set()` directly. Values set this way are **not** prefixed — they go into `$app` exactly as written. Use the return array for plugin config that should be prefixed, and `$app->set()` for anything that intentionally needs a global key.
 
 **src/Config/Routes.php** defines routes. The PluginLoader wraps this file in a `$router->group()` using the route prepend, so you don't need your own group wrapper. `$configPrepend` is available for reading your plugin's config:
 
@@ -318,7 +309,7 @@ Run `php runway plugins` for a full command summary.
 | Command | Description |
 |---------|-------------|
 | `plugins:list` | Show all discovered plugins with status, source, and priority |
-| `plugins:info vendor/package <option> [all]` | Show plugin details) |
+| `plugins:info vendor/package <option> [all]` | Show plugin details |
 | `plugins:sync` | Add missing config entries for newly discovered plugins (disabled) |
 | `plugins:enable vendor/package` | Enable a plugin |
 | `plugins:disable vendor/package` | Disable a plugin |

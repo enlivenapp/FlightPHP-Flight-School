@@ -1,6 +1,12 @@
 <?php
 
 /**
+ * Shared plugin discovery and config helpers for Runway CLI commands.
+ *
+ * Provides methods for discovering plugins, validating names,
+ * reading/writing plugin config, and atomic file updates.
+ *
+ * @package   Enlivenapp\FlightSchool
  * @copyright 2026 enlivenapp
  * @license   MIT
  */
@@ -98,6 +104,11 @@ trait PluginDiscoveryTrait
 
     /**
      * Update a plugin's config value in config.php.
+     *
+     * @param string $packageName Composer package name.
+     * @param string $key         Config key to update (e.g. 'enabled').
+     * @param mixed  $value       New value.
+     * @return bool True if the update was applied.
      */
     protected function updatePluginConfig(string $packageName, string $key, mixed $value): bool
     {
@@ -128,6 +139,10 @@ trait PluginDiscoveryTrait
 
     /**
      * Atomically read, modify, and write a file under an exclusive lock.
+     *
+     * @param string   $file     Absolute path to the file.
+     * @param callable $modifier Receives file contents, returns modified contents.
+     * @return bool
      */
     protected function lockedFileUpdate(string $file, callable $modifier): bool
     {

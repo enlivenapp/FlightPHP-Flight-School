@@ -1,6 +1,9 @@
 <?php
 
 /**
+ * List all discovered plugins with their status, source, and priority.
+ *
+ * @package   Enlivenapp\FlightSchool\Commands
  * @copyright 2026 enlivenapp
  * @license   MIT
  */
@@ -16,11 +19,19 @@ class PluginsListCommand extends AbstractBaseCommand
 {
     use PluginDiscoveryTrait;
 
+    /**
+     * @param array $config Runway config.
+     */
     public function __construct(array $config)
     {
         parent::__construct('plugins:list', 'List all discovered plugins with their status', $config);
     }
 
+    /**
+     * Discover all plugins and print a formatted table.
+     *
+     * @return void
+     */
     public function execute(): void
     {
         $io = $this->app()->io();
