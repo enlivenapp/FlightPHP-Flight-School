@@ -84,6 +84,8 @@ class PluginLoader
             if (!$this->isEnabled($packageName)) {
                 continue;
             }
+            // Migration / version-delta check for this plugin.
+            $this->checkMigrate($packageName);
 
             $this->resolvePluginRoot($packageName);
             $this->registerPluginViewPath($packageName);
@@ -262,18 +264,26 @@ class PluginLoader
         $configPrepend = $configPrepend ?? $this->deriveConfigPrepend($packageName);
         $routePrepend = $routePrepend ?? $this->deriveRoutePrepend($packageName);
 
+        // Merge app-level config overrides from plugins array
+        $appOverrides = $this->enabledPlugins[$packageName] ?? [];
+        unset($appOverrides['enabled'], $appOverrides['priority']);
+        if (!empty($appOverrides)) {
+            $config = array_replace_recursive($config, $appOverrides);
+        }
+
         // Store config on $app under the prefixed key
         if (!empty($config)) {
             $app->set($configPrepend, $config);
         }
         $this->pluginConfigs[$packageName] = $config;
 
-        // 2. Routes — auto-wrapped in prefix group
+        // 2. Routes — auto-wrapped in prefix group with plugin view context
         $routesFile = $dir . DIRECTORY_SEPARATOR . 'Routes.php';
         if (file_exists($routesFile)) {
+            $viewMiddleware = new PluginViewContextMiddleware($app, $packageName);
             $router->group('/' . $routePrepend, function (Router $router) use ($app, $routesFile, $configPrepend) {
                 require $routesFile;
-            });
+            }, [$viewMiddleware]);
         }
 
         // 3. Everything else (Services.php intentionally skipped)
@@ -493,5 +503,137 @@ class PluginLoader
         $namespace = array_key_first($autoload);
 
         return rtrim($namespace, '\\') . '\\Plugin';
+    }
+
+    /**
+     * Check whether this plugin's config-recorded version differs from
+     * its currently installed Composer version. When different, hand off
+     * to flight-migrations to run migrations and seed deltas.
+     *
+     * @param string $packageName Composer package name.
+     * @return void
+     */
+    protected function checkMigrate(string $packageName): void
+    {
+        $settings = $this->enabledPlugins[$packageName] ?? [];
+        $configVersion = $settings['version'] ?? null;
+        $installedVersion = $this->readInstalledVersion($packageName);
+
+        if ($installedVersion === null || $configVersion === $installedVersion) {
+            return;
+        }
+
+        if (!class_exists(\Enlivenapp\FlightMigrations\Helpers\CommandHelper::class)) {
+            return;
+        }
+
+        $this->resolvePluginRoot($packageName);
+        if (!isset($this->pluginRoots[$packageName])) {
+            return;
+        }
+
+        $pluginClass = ($this->pluginNamespaces[$packageName] ?? '') . '\\Plugin';
+        $seeds = [];
+        if (class_exists($pluginClass)) {
+            $plugin = new $pluginClass();
+            $seeds = $plugin->seeds ?? [];
+        }
+
+        try {
+            $runner = \Enlivenapp\FlightMigrations\Helpers\CommandHelper::buildRunner($this->app);
+            $result = $runner->handleActivate(
+                $packageName,
+                $this->pluginRoots[$packageName],
+                $configVersion,
+                $installedVersion,
+                $seeds,
+                false
+            );
+        } catch (\Throwable $e) {
+            return;
+        }
+
+        if ($result->isSuccess()) {
+            $this->writeNewVersionToConfig($packageName, $installedVersion);
+        }
+    }
+
+    /**
+     * Write the given version into this plugin's config.php entry.
+     * Inserts the 'version' key if missing; replaces it if present.
+     * Keeps the in-memory enabledPlugins state in sync.
+     *
+     * @param string $packageName Composer package name.
+     * @param string $newVersion  Version string (already stripped of any 'v' prefix).
+     * @return void
+     */
+    protected function writeNewVersionToConfig(string $packageName, string $newVersion): void
+    {
+        $configFile = dirname($this->vendorPath) . '/app/config/config.php';
+        if (!file_exists($configFile)) {
+            return;
+        }
+
+        $contents = file_get_contents($configFile);
+        if ($contents === false) {
+            return;
+        }
+
+        $replacePattern = '/(\'' . preg_quote($packageName, '/') . '\'\s*=>\s*\[[^\]]*?\'version\'\s*=>\s*\')([^\']*)(\')/s';
+        $replaced = preg_replace(
+            $replacePattern,
+            '${1}' . addslashes($newVersion) . '${3}',
+            $contents,
+            1,
+            $replaceCount
+        );
+
+        if ($replaceCount > 0 && $replaced !== null && $replaced !== $contents) {
+            file_put_contents($configFile, $replaced);
+            $this->enabledPlugins[$packageName]['version'] = $newVersion;
+            return;
+        }
+
+        // No existing 'version' key in this entry — insert one right after the opening '[' line.
+        $insertPattern = '/(\'' . preg_quote($packageName, '/') . '\'\s*=>\s*\[\s*\n)/';
+        $insertLine    = "\t\t\t'version' => '" . addslashes($newVersion) . "',\n";
+        $inserted      = preg_replace($insertPattern, '${1}' . $insertLine, $contents, 1, $insertCount);
+
+        if ($insertCount > 0 && $inserted !== null && $inserted !== $contents) {
+            file_put_contents($configFile, $inserted);
+            $this->enabledPlugins[$packageName]['version'] = $newVersion;
+        }
+    }
+
+    /**
+     * Read the installed Composer version of a package from
+     * vendor/composer/installed.json.
+     *
+     * @param string $packageName Composer package name.
+     * @return string|null The installed version string, or null if not found.
+     */
+    protected function readInstalledVersion(string $packageName): ?string
+    {
+        $installedFile = $this->vendorPath . DIRECTORY_SEPARATOR . 'composer' . DIRECTORY_SEPARATOR . 'installed.json';
+        if (!file_exists($installedFile)) {
+            return null;
+        }
+
+        $installed = json_decode(file_get_contents($installedFile), true);
+        $packages = $installed['packages'] ?? $installed ?? [];
+
+        foreach ($packages as $pkg) {
+            if (($pkg['name'] ?? null) === $packageName) {
+                $version = $pkg['version'] ?? null;
+                if ($version === null) {
+                    return null;
+                }
+                // Strip Composer's "v" tag prefix so versions match semver
+                // convention for comparator calls downstream.
+                return ltrim($version, 'v');
+            }
+        }
+
+        return null;
     }
 }

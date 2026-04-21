@@ -1,15 +1,19 @@
 # Flight School
 
-Plugin architecture for FlightPHP. Composer gets plugin code on disk. Flight School wires it into the running app.
+Composer based plugin support for FilghtPHP.
 
 - **Automatic boot order** for plugin files (Config, Routes) with `$app` and `$router` available
-- **Auto-prefixed config and routes** so plugins don't step on each other
+- **Auto-prefixed config and routes management** so plugins don't step on each other
 - **Enable/disable** plugins in `app/config/config.php`
 - **Priority-based load ordering** between plugins
 - **View overrides** so the host app can replace any plugin view
 - **Cross-plugin discovery** via `getPaths()` (migrations, seeds, etc.)
 - **CLI commands** to list, info, sync, enable, and disable plugins
 - **Security** checks (path containment, symlink rejection)
+
+v 0.2.2
+- introduced support for flight-migrations
+- removed Cycle ORM suport
 
 Plugins use FlightPHP's `Engine` and `Router` directly, no wrapper APIs.
 
@@ -18,7 +22,7 @@ Plugins use FlightPHP's `Engine` and `Router` directly, no wrapper APIs.
 ## Requirements
 
 - PHP 8.1+
-- A [FlightPHP skeleton project](https://github.com/flightphp/skeleton)
+- A [FlightPHP skeleton project](https://github.com/flightphp/skeleton).
 
 ```bash
 composer create-project flightphp/skeleton my-project
@@ -33,7 +37,7 @@ or `composer create-project flightphp/skeleton .` to install in the same directo
 composer require enlivenapp/flight-school
 ```
 
-Composer will ask you to trust the plugin. Type `yes`. This allows Flight School to set up your project:
+Composer will ask you to trust the plugin. Type `y`. This allows Flight School to set itself up your project:
 
 > *We recommend always reviewing someone elses' code before installing it*
 
@@ -45,9 +49,43 @@ Plugins are disabled by default. Enable them in `config.php` by setting `'enable
 
 ## Writing a Plugin
 
-A plugin is a Composer package with files in `src/Config/`. The PluginLoader loads them automatically.
+Check out [Flight Factory](https://github.com/enlivenapp/FlightPHP-Factory)
 
-**src/Config/Config.php** sets prefixes and returns config values. The PluginLoader stores the returned array on `$app` with the prefix applied, so two plugins can't overwrite each other's config:
+
+## Plugin Discovery
+The Plugin Loader loads Composer package automatically.
+
+**composer.json** Flight School looks for any Composer package with a `type` starting with `flightphp-` is treated as a plugin. Flight School reads the PSR-4 namespace from `vendor/composer/installed.json` and loads the plugin's `src/Config/` files automatically. If a `Plugin` class exists (e.g. `YourVendor\YourPlugin\Plugin`), its `register()` method is called after.
+
+```
+{
+    "name": "enlivenapp/hello-world-plugin",
+    "description": "Reference FlightPHP plugin demonstration for FlightSchool",
+    "type": "flightphp-plugin",
+...
+}
+```
+
+When you `composer require` a `flightphp-*` package, its config entry is added automatically (disabled).
+
+
+### src/Config/*
+
+All files in this folder are optional.
+
+Flight::app() as `$app` is available in Config.php, so you can also call `$app->set()` directly. Values set this way are **not** prefixed — they go into `$app` exactly as written. Use the return array for plugin config that should be prefixed, and `$app->set()` for anything that intentionally needs a global key.
+
+Flight::router as `$router` is available.
+
+**Services don't need registration.** Composer autoloading makes all plugin classes available by their full name. Just use them directly:
+
+```php
+$mailer = new \MyVendor\MyPlugin\Services\Mailer();
+```
+
+
+### src/Config/Config.php 
+- sets prefixes and returns config values. The PluginLoader stores the returned array on `$app` with the prefix applied, so two plugins can't overwrite each other's config:
 
 ```php
 <?php
@@ -64,29 +102,42 @@ With the overrides above, config is stored as `blog` — read it with `$app->get
 - **Config:** `myvendor.my-plugin` (dot-separated package name)
 - **Routes:** `myvendor_my_plugin` (underscored package name)
 
-`$app` is available in Config.php, so you can also call `$app->set()` directly. Values set this way are **not** prefixed — they go into `$app` exactly as written. Use the return array for plugin config that should be prefixed, and `$app->set()` for anything that intentionally needs a global key.
 
-**src/Config/Routes.php** defines routes. The PluginLoader wraps this file in a `$router->group()` using the route prepend, so you don't need your own group wrapper. `$configPrepend` is available for reading your plugin's config:
+
+### src/Config/Routes.php
+
+Defines routes. The PluginLoader wraps this file in a `$router->group()` using the route prepend, so you don't need your own group wrapper. `$configPrepend` is available for reading your plugin's config:
 
 ```php
 <?php
-$config = $app->get($configPrepend);
+// src/Config/Config.php
+$routePrepend = 'blog';
+//...
 
-$router->get('/', [BlogController::class, 'index']);
-$router->get('/@slug', [BlogController::class, 'show']);
+$router->get('/', [BlogController::class, 'index']); // ex.com/blog/
+$router->get('/@slug', [BlogController::class, 'show']); // ec.com/blog/@slug 
+
+// src/Config/Config.php
+$routePrepend = '';
+//...
+
+$router->get('/', [BlogController::class, 'index']); // ex.com/
+$router->get('/@slug', [BlogController::class, 'show']); // ex.com/@slug
+
+
+// src/Config/Config.php
+// $routePrepend = '';  // commented out
+//...
+
+$router->get('/', [BlogController::class, 'index']); // ex.com/vendor_package/
+$router->get('/@slug', [BlogController::class, 'show']); // ex.com/vendor_package/@slug
 ```
 
-With `$routePrepend = 'blog'` these become `/blog/` and `/blog/@slug`. Without the override they'd be `/myvendor_my_plugin/` and `/myvendor_my_plugin/@slug`.
 
-Only include the files your plugin needs. `$app` and `$router` are available in all Config/ files.
 
-**Services don't need registration.** Composer autoloading makes all plugin classes available by their full name. Just use them directly:
+### src/Plugin.php (optional) 
 
-```php
-$mailer = new \MyVendor\MyPlugin\Services\Mailer();
-```
-
-**Plugin.php is optional.** If your plugin needs custom setup beyond what Config/ files provide (events, middleware, etc.), create `src/Plugin.php` implementing `PluginInterface`. The loader calls `register()` after the Config/ files are loaded:
+If your plugin needs custom setup beyond what Config/ files provide (events, middleware, writing config defaults to app/config/config.php, etc.), create `src/Plugin.php` implementing `PluginInterface`. The loader calls `register()` after the Config/ files are loaded:
 
 ```php
 <?php
@@ -98,32 +149,69 @@ use flight\net\Router;
 
 class Plugin implements PluginInterface
 {
+    // Migration seeds
+    public array $seeds = [
+        // runs when no version is found
+        // in app/config/config.php
+        'install' => [
+            [
+                'table' => 'auth_groups',
+                'rows'  => [
+                    ['alias' => 'superadmin', 'title' => 'Super Admin', 'description' => 'Full system access'],
+                    ['alias' => 'admin',      'title' => 'Admin',       'description' => 'Administrative access'],
+                    ['alias' => 'user',       'title' => 'User',        'description' => 'Standard user'],
+                ],
+            ],
+            // only runs seeds for v0.1.0
+            'versions' => [
+                '0.1.0' => [
+                    'table' => 'auth_groups',
+                    'rows'  => [
+                        ['alias' => 'editor', 'title' => 'Editor', 'description' => 'Edit Blog Posts'],
+                    ],
+                ],
+                // only runs seeds for v0.1.1
+                '0.1.1' => [
+                    'table' => 'auth_groups',
+                    'rows'  => [
+                        ['alias' => 'author', 'title' => 'Author', 'description' => 'Post and Blog Author'],
+                    ],
+                ],
+            ],
+        ],
+    ];
+
+    // do this at runtime
     public function register(Engine $app, Router $router, array $config = []): void
     {
+        // call other method....
+        $this->ensureAppConfig();
+
         $app->onEvent('flight.request.received', function () {
             // Runs before routing
         });
     }
+
+    protected function ensureAppConfig(): void
+    {
+
+    }
 }
 ```
 
-## Plugin Discovery
-
-Any Composer package with a `type` starting with `flightphp-` is treated as a plugin. Flight School reads the PSR-4 namespace from `vendor/composer/installed.json` and loads the plugin's `src/Config/` files automatically. If a `Plugin` class exists (e.g. `YourVendor\YourPlugin\Plugin`), its `register()` method is called after.
-
-When you `composer require` a `flightphp-*` package, its config entry is added automatically (disabled).
 
 ## Configuration
 
-Plugin config has two parts:
+**app/config/config.php**
 
-**1. App config** in `app/config/config.php` only controls which plugins are enabled and their load order:
+`app/config/config.php` (note case) controls which plugins are enabled, their load order, and any config overrides:
 
 ```php
 'plugins' => [
     'myvendor/my-plugin' => [
         'enabled'  => true,
         'priority' => 10,
+        'posts_per_page' => 25,  // overrides the plugin's default
     ],
 ],
 ```
@@ -132,14 +220,25 @@ Plugin config has two parts:
 |-----|---------|-------------|
 | `enabled` | `false` | Set `true` to load the plugin |
 | `priority` | `50` | Lower numbers load first. Use when one plugin depends on another. |
+| *(any other key)* | — | Overrides the matching key in the plugin's `src/Config/Config.php` |
 
-**2. Plugin config** lives in the plugin's own `src/Config/` directory. The PluginLoader loads files in this order:
+After enabling a plugin, the next page call will cause migrations(if any) and seeds(if any) to run if flight-migrations package is installed.  `'version => 'x.x.x'` will appear in your config file.
 
-1. `Config.php` — return config values, optionally set prepend overrides
-2. `Routes.php` — define routes (auto-wrapped in prefix group)
-3. Any other `.php` files (Services.php is skipped)
 
-`$app` and `$router` are available in all Config/ files. `$configPrepend` is available in Routes.php.
+```php
+'plugins' => [
+    'myvendor/my-plugin' => [
+        'version'  => '0.1.1',
+        'enabled'  => true,
+        'priority' => 10,
+        'posts_per_page' => 25,  // overrides the plugin's default
+    ],
+],
+```
+This is the automatic process of tracking your plugins with Flight School to trigger Flight School's automation. On a Composer update, the version changes in `vendor/composer/installed.json`.  Flight School compares that number to `null`(first run after enabling) or `x.x.x`(composer updated) to determine if migrations and seeds should run again.  When updating with Composer, expect a longer first page load after updating if flight-migrations are installed. 
+
+Any keys beyond `enabled` and `priority` are merged over the plugin's defaults at runtime using `array_replace_recursive`. This lets you customize plugin behavior without editing vendor files. The plugin's `src/Config/Config.php` provides the defaults; your app config provides the overrides.
+
 
 ## Plugin Structure
 
@@ -162,7 +261,11 @@ my-plugin/
     Views/                <- overridable by the app
 ```
 
-Directories follow PSR-4 convention, where folder names map directly to namespace segments. The one exception is `commands/` — it must be lowercase because Runway discovers command files by scanning the filesystem directly, not through Composer's autoloader. The bridge between the two is the `autoload` section in your plugin's `composer.json`:
+Directories follow PSR-4 convention, where folder names map directly to namespace segments. The one exception is `commands/` — it must be lowercase because Runway discovers command files by scanning the filesystem directly, not through Composer's autoloader. 
+
+**For Beginners**
+
+PSR-4 Autoloading is handled in `composer.json`:
 
 ```json
 "autoload": {
@@ -198,8 +301,20 @@ use MyVendor\MyPlugin\Services\Mailer;
 
 Plugins can extend core app classes:
 
+`src/Models/UserModel.php`
+
 ```php
 use app\models\UserModel;
+
+class ExtendedUser extends UserModel { ... }
+```
+
+and vice versa: 
+
+`app/models/ExtendedUser.php`
+
+```php
+use MyVendor\MyPlugin\Models\UserModel
 
 class ExtendedUser extends UserModel { ... }
 ```
@@ -208,23 +323,33 @@ Plugins can also extend classes from other plugins as long as the dependency loa
 
 Special cases:
 
-- **`commands/`** (lowercase) Runway CLI commands extending `AbstractBaseCommand` are discovered and available automatically (e.g. `php runway myplugin:do-something`). Must be lowercase — Runway scans the filesystem directly, not through Composer's autoloader.
+- **`commands/`** (lowercase) Runway CLI commands extending `AbstractBaseCommand` are discovered and available automatically (e.g. `php runway myplugin:do-something`). Must be lowercase — Runway scans the filesystem directly, not through Composer's autoloader.  See `runway` docs for more information
 - **`Views/`** Handled by the view override system (see Views and Overrides)
 
 ## Views and Overrides
 
-Render plugin views with the `{vendor}/{package}/{template}` convention:
+Inside a plugin's routes, render views using just the template name:
 
 ```php
-$app->render('myvendor/my-plugin/dashboard', ['data' => $data]);
+$app->render('dashboard', ['data' => $data]);
 ```
+
+Flight School automatically knows which plugin is handling the request and resolves the view from that plugin's `src/Views/` directory. No package prefix needed.
 
 Flight School checks two locations in order:
 
 1. `app/views/myvendor/my-plugin/dashboard.php` (app override)
 2. `vendor/myvendor/my-plugin/src/Views/dashboard.php` (plugin default)
 
-To override a plugin's view, create the file at the app path. Delete it to revert to the plugin's default.
+To override a plugin's view, create the matching file under `app/views/{vendor}/{package}/`. The directory structure mirrors the plugin's `src/Views/`:
+
+```
+Plugin:   vendor/myvendor/my-plugin/src/Views/admin/settings.php
+Override: app/views/myvendor/my-plugin/admin/settings.php
+```
+
+Delete the override to revert to the plugin's default.
+
 
 ## Plugin Loader API
 
@@ -340,7 +465,7 @@ Minimum `composer.json`:
 
 Key points:
 
-- **`type`** must start with `flightphp-` (e.g. `flightphp-plugin`, `flightphp-widget`, `flightphp-theme`)
+- **`type`** must start with `flightphp-` 
 - **`autoload`** must use PSR-4 pointing to `src/`.
 - **`Plugin.php` is optional.** If included, it must live at `src/Plugin.php` and implement `PluginInterface`. The loader calls `register()` after Config/ files are loaded.
 

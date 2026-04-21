@@ -91,7 +91,7 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
         // When any flightphp-* plugin is installed, add a disabled config entry
         $type = $package->getType();
         if (str_starts_with($type, 'flightphp-')) {
-            $this->addPluginConfigEntry($projectRoot, $package->getName());
+            $this->addPluginConfigEntry($projectRoot, $package->getName(), $package->getPrettyVersion());
         }
     }
 
@@ -112,15 +112,16 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
     /**
      * Add a disabled config entry for a newly installed plugin.
      *
-     * Only writes 'enabled' and 'priority'. Config values live in
+     * Only writes 'enabled', 'priority', and 'version'. Config values live in
      * the plugin's own src/Config/Config.php — the PluginLoader reads
      * those at runtime.
      *
      * @param string $projectRoot Absolute path to the project root.
      * @param string $packageName Composer package name.
+     * @param string $version     Installed package version (from Composer).
      * @return void
      */
-    protected function addPluginConfigEntry(string $projectRoot, string $packageName): void
+    protected function addPluginConfigEntry(string $projectRoot, string $packageName, string $version): void
     {
         foreach (['config.php', 'config_sample.php'] as $filename) {
             $file = $projectRoot . '/app/config/' . $filename;
@@ -130,7 +131,7 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
             }
 
             $io = $this->io;
-            $this->lockedFileUpdate($file, function ($contents) use ($packageName, $filename, $io) {
+            $this->lockedFileUpdate($file, function ($contents) use ($packageName, $version, $filename, $io) {
                 if (str_contains($contents, "'" . $packageName . "'")) {
                     return $contents;
                 }
@@ -227,12 +228,6 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
  * Discovers and loads plugins from Composer packages with type "flightphp-*"
  * in installed.json.
  *
- * Plugins must implement Enlivenapp\FlightSchool\PluginInterface.
- * Enable/disable and configure plugins in config.php under the 'plugins' key.
- *
- * Views: Plugins serve views from their src/views/ directory.
- * Override any plugin view by placing a file at app/views/{vendor}/{package}/
- *
  * Docs: https://github.com/enlivenapp/FlightPHP-Flight-School
  **********************************************/
 $app->register('pluginLoader', \Enlivenapp\FlightSchool\PluginLoader::class, [
@@ -281,7 +276,7 @@ PHP;
         $pluginsBlock = <<<'PHP'
 
 	/**************************************
-	 *        Plugins                    *
+	 *   Flight School Plugin Manager     *
 	 **************************************/
 	'plugins' => [
 		// 'enlivenapp/flight-blog' => [
