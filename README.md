@@ -1,3 +1,9 @@
+[![Version](http://poser.pugx.org/enlivenapp/flight-school/version)](https://packagist.org/packages/enlivenapp/flight-school)
+[![License](http://poser.pugx.org/enlivenapp/flight-school/license)](https://packagist.org/packages/enlivenapp/flight-school)
+[![Suggesters](http://poser.pugx.org/enlivenapp/flight-school/suggesters)](https://packagist.org/packages/enlivenapp/flight-school)
+[![PHP Version Require](http://poser.pugx.org/enlivenapp/flight-school/require/php)](https://packagist.org/packages/enlivenapp/flight-school)
+[![Monthly Downloads](https://poser.pugx.org/enlivenapp/flight-school/d/monthly)](https://packagist.org/packages/enlivenapp/flight-school)
+
 # Flight School
 
 Composer based plugin support for FilghtPHP.
@@ -12,7 +18,7 @@ Composer based plugin support for FilghtPHP.
 - **Security** checks (path containment, symlink rejection)
 
 v 0.2.2
-- introduced support for flight-migrations
+- introduced support for enlivenapp/migrations
 - removed Cycle ORM suport
 
 Plugins use FlightPHP's `Engine` and `Router` directly, no wrapper APIs.
@@ -222,7 +228,7 @@ class Plugin implements PluginInterface
 | `priority` | `50` | Lower numbers load first. Use when one plugin depends on another. |
 | *(any other key)* | — | Overrides the matching key in the plugin's `src/Config/Config.php` |
 
-After enabling a plugin, the next page call will cause migrations(if any) and seeds(if any) to run if flight-migrations package is installed.  `'version => 'x.x.x'` will appear in your config file.
+After enabling a plugin, the next page call will cause migrations(if any) and seeds(if any) to run if enlivenapp/migrations package is installed.  `'version => 'x.x.x'` will appear in your config file.
 
 
 ```php
@@ -235,7 +241,7 @@ After enabling a plugin, the next page call will cause migrations(if any) and se
     ],
 ],
 ```
-This is the automatic process of tracking your plugins with Flight School to trigger Flight School's automation. On a Composer update, the version changes in `vendor/composer/installed.json`.  Flight School compares that number to `null`(first run after enabling) or `x.x.x`(composer updated) to determine if migrations and seeds should run again.  When updating with Composer, expect a longer first page load after updating if flight-migrations are installed. 
+This is the automatic process of tracking your plugins with Flight School to trigger Flight School's automation. On a Composer update, the version changes in `vendor/composer/installed.json`.  Flight School compares that number to `null`(first run after enabling) or `x.x.x`(composer updated) to determine if migrations and seeds should run again.  When updating with Composer, expect a longer first page load after updating if enlivenapp/migrations are installed. 
 
 Any keys beyond `enabled` and `priority` are merged over the plugin's defaults at runtime using `array_replace_recursive`. This lets you customize plugin behavior without editing vendor files. The plugin's `src/Config/Config.php` provides the defaults; your app config provides the overrides.
 

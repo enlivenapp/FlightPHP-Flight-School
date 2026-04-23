@@ -80,12 +80,13 @@ class PluginLoader
         }
         uasort($prioritized, fn($a, $b) => $a['priority'] <=> $b['priority']);
 
+        // Run all pending migrations and seeds before loading plugins
+        $this->runMigrations();
+
         foreach ($prioritized as $packageName => $info) {
             if (!$this->isEnabled($packageName)) {
                 continue;
             }
-            // Migration / version-delta check for this plugin.
-            $this->checkMigrate($packageName);
 
             $this->resolvePluginRoot($packageName);
             $this->registerPluginViewPath($packageName);
@@ -506,55 +507,30 @@ class PluginLoader
     }
 
     /**
-     * Check whether this plugin's config-recorded version differs from
-     * its currently installed Composer version. When different, hand off
-     * to flight-migrations to run migrations and seed deltas.
+     * Run all pending migrations and seeds via enlivenapp/migrations.
      *
-     * @param string $packageName Composer package name.
+     * Called once before the plugin loading loop. On success, updates
+     * the version in app/config/config.php for each package that ran.
+     *
      * @return void
      */
-    protected function checkMigrate(string $packageName): void
+    protected function runMigrations(): void
     {
-        $settings = $this->enabledPlugins[$packageName] ?? [];
-        $configVersion = $settings['version'] ?? null;
-        $installedVersion = $this->readInstalledVersion($packageName);
-
-        if ($installedVersion === null || $configVersion === $installedVersion) {
+        if (!class_exists(\Enlivenapp\Migrations\Services\MigrationSetup::class)) {
             return;
-        }
-
-        if (!class_exists(\Enlivenapp\FlightMigrations\Helpers\CommandHelper::class)) {
-            return;
-        }
-
-        $this->resolvePluginRoot($packageName);
-        if (!isset($this->pluginRoots[$packageName])) {
-            return;
-        }
-
-        $pluginClass = ($this->pluginNamespaces[$packageName] ?? '') . '\\Plugin';
-        $seeds = [];
-        if (class_exists($pluginClass)) {
-            $plugin = new $pluginClass();
-            $seeds = $plugin->seeds ?? [];
         }
 
         try {
-            $runner = \Enlivenapp\FlightMigrations\Helpers\CommandHelper::buildRunner($this->app);
-            $result = $runner->handleActivate(
-                $packageName,
-                $this->pluginRoots[$packageName],
-                $configVersion,
-                $installedVersion,
-                $seeds,
-                false
-            );
+            $migrate = new \Enlivenapp\Migrations\Services\MigrationSetup();
+            $results = $migrate->runMigrate();
         } catch (\Throwable $e) {
             return;
         }
 
-        if ($result->isSuccess()) {
-            $this->writeNewVersionToConfig($packageName, $installedVersion);
+        foreach ($results as $packageName => $moduleResult) {
+            if ($moduleResult->isSuccess() && $moduleResult->getVersion() !== null) {
+                $this->writeNewVersionToConfig($packageName, $moduleResult->getVersion());
+            }
         }
     }
 
@@ -588,9 +564,11 @@ class PluginLoader
             $replaceCount
         );
 
-        if ($replaceCount > 0 && $replaced !== null && $replaced !== $contents) {
-            file_put_contents($configFile, $replaced);
-            $this->enabledPlugins[$packageName]['version'] = $newVersion;
+        if ($replaceCount > 0 && $replaced !== null) {
+            if ($replaced !== $contents) {
+                file_put_contents($configFile, $replaced);
+                $this->enabledPlugins[$packageName]['version'] = $newVersion;
+            }
             return;
         }
 
@@ -605,35 +583,4 @@ class PluginLoader
         }
     }
 
-    /**
-     * Read the installed Composer version of a package from
-     * vendor/composer/installed.json.
-     *
-     * @param string $packageName Composer package name.
-     * @return string|null The installed version string, or null if not found.
-     */
-    protected function readInstalledVersion(string $packageName): ?string
-    {
-        $installedFile = $this->vendorPath . DIRECTORY_SEPARATOR . 'composer' . DIRECTORY_SEPARATOR . 'installed.json';
-        if (!file_exists($installedFile)) {
-            return null;
-        }
-
-        $installed = json_decode(file_get_contents($installedFile), true);
-        $packages = $installed['packages'] ?? $installed ?? [];
-
-        foreach ($packages as $pkg) {
-            if (($pkg['name'] ?? null) === $packageName) {
-                $version = $pkg['version'] ?? null;
-                if ($version === null) {
-                    return null;
-                }
-                // Strip Composer's "v" tag prefix so versions match semver
-                // convention for comparator calls downstream.
-                return ltrim($version, 'v');
-            }
-        }
-
-        return null;
-    }
 }
