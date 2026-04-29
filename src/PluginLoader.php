@@ -43,6 +43,9 @@ class PluginLoader
     /** @var ?string Package currently being loaded (set during register() calls) */
     protected ?string $currentPackage = null;
 
+    /** @var AdminExtend Admin extension point registry for plugin content injection */
+    protected AdminExtend $adminExtend;
+
     /**
      * @param Engine $app            The FlightPHP app instance.
      * @param Router $router         The FlightPHP router.
@@ -55,6 +58,40 @@ class PluginLoader
         $this->router = $router;
         $this->vendorPath = rtrim($vendorPath, DIRECTORY_SEPARATOR);
         $this->enabledPlugins = $enabledPlugins;
+        $this->adminExtend = new AdminExtend();
+        $this->initAdext();
+    }
+
+    /**
+     * Map $app->adext() to the AdminExtend registry.
+     *
+     * Usage:
+     *   $app->adext('menu', 'content', 'pubvana.blog', [...])           — register a menu contribution
+     *   $app->adext('page', 'users.edit.tabs', 'pubvana.profile', [...])— register a page contribution
+     *   $app->adext('menu', 'content')                                  — read menu contributions
+     *   $app->adext('page', 'users.edit.tabs', ['user_id' => 5])       — read page contributions with context
+     */
+    protected function initAdext(): void
+    {
+        $adext = $this->adminExtend;
+
+        $this->app->map('adext', function (string $type, string $name, ...$args) use ($adext) {
+            // Read: no extra args
+            if (empty($args)) {
+                return $adext->get($type, $name);
+            }
+
+            // Read with context: one array arg
+            if (count($args) === 1 && is_array($args[0])) {
+                return $adext->get($type, $name, $args[0]);
+            }
+
+            // Write: string key + array config
+            if (count($args) === 2 && is_string($args[0]) && is_array($args[1])) {
+                $adext->register($type, $name, $args[0], $args[1]);
+                return null;
+            }
+        });
     }
 
     /**
@@ -287,8 +324,17 @@ class PluginLoader
             }, [$viewMiddleware]);
         }
 
+        // 2b. Admin Routes — auto-wrapped in /admin prefix with plugin view context
+        $adminRoutesFile = $dir . DIRECTORY_SEPARATOR . 'AdminRoutes.php';
+        if (file_exists($adminRoutesFile)) {
+            $viewMiddleware = $viewMiddleware ?? new PluginViewContextMiddleware($app, $packageName);
+            $router->group('/admin', function (Router $router) use ($app, $adminRoutesFile, $configPrepend) {
+                require $adminRoutesFile;
+            }, [$viewMiddleware]);
+        }
+
         // 3. Everything else (Services.php intentionally skipped)
-        $handled = ['Config.php', 'Services.php', 'Routes.php'];
+        $handled = ['Config.php', 'Services.php', 'Routes.php', 'AdminRoutes.php'];
         foreach (glob($dir . DIRECTORY_SEPARATOR . '*.php') as $file) {
             if (!in_array(basename($file), $handled, true)) {
                 require $file;
@@ -529,58 +575,10 @@ class PluginLoader
 
         foreach ($results as $packageName => $moduleResult) {
             if ($moduleResult->isSuccess() && $moduleResult->getVersion() !== null) {
-                $this->writeNewVersionToConfig($packageName, $moduleResult->getVersion());
+                $this->enabledPlugins[$packageName]['version'] = $moduleResult->getVersion();
             }
         }
     }
 
-    /**
-     * Write the given version into this plugin's config.php entry.
-     * Inserts the 'version' key if missing; replaces it if present.
-     * Keeps the in-memory enabledPlugins state in sync.
-     *
-     * @param string $packageName Composer package name.
-     * @param string $newVersion  Version string (already stripped of any 'v' prefix).
-     * @return void
-     */
-    protected function writeNewVersionToConfig(string $packageName, string $newVersion): void
-    {
-        $configFile = dirname($this->vendorPath) . '/app/config/config.php';
-        if (!file_exists($configFile)) {
-            return;
-        }
-
-        $contents = file_get_contents($configFile);
-        if ($contents === false) {
-            return;
-        }
-
-        $replacePattern = '/(\'' . preg_quote($packageName, '/') . '\'\s*=>\s*\[[^\]]*?\'version\'\s*=>\s*\')([^\']*)(\')/s';
-        $replaced = preg_replace(
-            $replacePattern,
-            '${1}' . addslashes($newVersion) . '${3}',
-            $contents,
-            1,
-            $replaceCount
-        );
-
-        if ($replaceCount > 0 && $replaced !== null) {
-            if ($replaced !== $contents) {
-                file_put_contents($configFile, $replaced);
-                $this->enabledPlugins[$packageName]['version'] = $newVersion;
-            }
-            return;
-        }
-
-        // No existing 'version' key in this entry — insert one right after the opening '[' line.
-        $insertPattern = '/(\'' . preg_quote($packageName, '/') . '\'\s*=>\s*\[\s*\n)/';
-        $insertLine    = "\t\t\t'version' => '" . addslashes($newVersion) . "',\n";
-        $inserted      = preg_replace($insertPattern, '${1}' . $insertLine, $contents, 1, $insertCount);
-
-        if ($insertCount > 0 && $inserted !== null && $inserted !== $contents) {
-            file_put_contents($configFile, $inserted);
-            $this->enabledPlugins[$packageName]['version'] = $newVersion;
-        }
-    }
 
 }

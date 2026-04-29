@@ -14,9 +14,13 @@ use flight\template\View;
 /**
  * Extends Flight's View to support plugin view resolution with app-level overrides.
  *
+ * If enlivenapp/vision is installed, public views render through Vision (.tpl) —
+ * no PHP execution. Admin/auth views use Flight's native PHP renderer (.php).
+ * Without Vision installed, all views use native PHP rendering.
+ *
  * Resolution order for a template like 'enlivenapp/flight-blog/post':
- *   1. app/views/enlivenapp/flight-blog/post.php  (user override)
- *   2. vendor/enlivenapp/flight-blog/src/Views/post.php  (plugin default)
+ *   1. app/views/enlivenapp/flight-blog/post.{tpl|php}  (user override)
+ *   2. vendor/enlivenapp/flight-blog/src/Views/post.{tpl|php}  (plugin default)
  */
 class PluginView extends View
 {
@@ -31,6 +35,17 @@ class PluginView extends View
      * The currently active plugin for automatic view resolution.
      */
     protected ?string $currentPlugin = null;
+
+    /**
+     * Route prefixes that use native PHP rendering when Vision is available.
+     * Everything else goes through Vision.
+     *
+     * @var string[]
+     */
+    protected array $nativeRenderPrefixes = ['/admin', '/auth'];
+
+    /** Vision engine instance (lazy-loaded). */
+    private ?object $visionEngine = null;
 
     /**
      * Register a plugin's view directory.
@@ -57,6 +72,85 @@ class PluginView extends View
     public function getCurrentPlugin(): ?string
     {
         return $this->currentPlugin;
+    }
+
+    /**
+     * Add a route prefix that should use native PHP rendering.
+     */
+    public function addNativeRenderPrefix(string $prefix): void
+    {
+        $this->nativeRenderPrefixes[] = $prefix;
+    }
+
+    /**
+     * Whether Vision is available (enlivenapp/vision is installed).
+     */
+    protected function hasVision(): bool
+    {
+        return class_exists(\Enlivenapp\Vision\Engine::class);
+    }
+
+    /**
+     * Get the Vision engine instance for filter/tag registration.
+     * Returns null if Vision is not installed.
+     */
+    public function vision(): ?object
+    {
+        if ($this->visionEngine === null && $this->hasVision()) {
+            $this->visionEngine = new \Enlivenapp\Vision\Engine();
+        }
+        return $this->visionEngine;
+    }
+
+    /**
+     * Check if the current request should use native PHP rendering.
+     */
+    protected function isNativeRender(): bool
+    {
+        $path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '';
+
+        foreach ($this->nativeRenderPrefixes as $prefix) {
+            if (str_starts_with($path, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Render a template.
+     *
+     * Native PHP routes (admin, auth) use Flight's include-based rendering.
+     * All other routes use Vision — no PHP execution in templates.
+     */
+    public function render(string $file, ?array $templateData = null): void
+    {
+        if (!$this->hasVision() || $this->isNativeRender()) {
+            $this->extension = '.php';
+            parent::render($file, $templateData);
+            return;
+        }
+
+        // Public view — Vision engine, .tpl only
+        $this->extension = '.tpl';
+        $template = $this->getTemplate($file);
+
+        if (!file_exists($template)) {
+            $normalized = self::normalizePath($template);
+            throw new \Exception("Template file not found: {$normalized}.");
+        }
+
+        $data = $this->vars;
+        if (is_array($templateData)) {
+            $data = array_merge($data, $templateData);
+            if ($this->preserveVars) {
+                $this->vars = array_merge($this->vars, $templateData);
+            }
+        }
+
+        $basePath = dirname($template) . '/';
+        echo $this->vision()->render($template, $data, $basePath);
     }
 
     /**
