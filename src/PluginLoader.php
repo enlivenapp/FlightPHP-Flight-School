@@ -60,6 +60,7 @@ class PluginLoader
         $this->enabledPlugins = $enabledPlugins;
         $this->adminExtend = new AdminExtend();
         $this->initAdext();
+        $this->initSlugify();
     }
 
     /**
@@ -95,6 +96,21 @@ class PluginLoader
     }
 
     /**
+     * Map $app->slugify() for URL-safe slug generation.
+     */
+    protected function initSlugify(): void
+    {
+        $this->app->map('slugify', function (string $text): string {
+            $text = strtolower(trim($text));
+            $text = str_replace('&', 'and', $text);
+            $text = preg_replace('/[^a-z0-9\s-]/', '', $text);
+            $text = preg_replace('/[\s]+/', '-', $text);
+            $text = preg_replace('/-+/', '-', $text);
+            return trim($text, '-');
+        });
+    }
+
+    /**
      * Discover and load all enabled plugins.
      *
      * @return array<string, PluginInterface> Loaded plugin instances keyed by package name
@@ -102,6 +118,7 @@ class PluginLoader
     public function loadPlugins(): array
     {
         $this->initPluginView();
+        $this->initActiveTheme();
 
         $discovered = $this->discover();
 
@@ -165,6 +182,29 @@ class PluginLoader
 
         // Force instantiation so pluginView is available for addPluginPath calls
         $this->app->view();
+    }
+
+    /**
+     * Set the active theme's Views/ path on PluginView so templates
+     * can resolve through the theme override tier.
+     *
+     * Reads 'active_theme' from app config (e.g., 'default').
+     * Looks for themes/{name}/Views/ relative to the project root.
+     */
+    protected function initActiveTheme(): void
+    {
+        if ($this->pluginView === null) {
+            return;
+        }
+
+        $themeName = $this->app->get('active_theme') ?? 'default';
+        $projectRoot = dirname($this->vendorPath);
+        $themePath = $projectRoot . DIRECTORY_SEPARATOR . 'themes'
+            . DIRECTORY_SEPARATOR . $themeName . DIRECTORY_SEPARATOR . 'Views';
+
+        if (is_dir($themePath)) {
+            $this->pluginView->setThemePath($themePath);
+        }
     }
 
     /**
@@ -262,9 +302,9 @@ class PluginLoader
      * files alphabetically. Services.php is intentionally skipped —
      * services use Composer autoloading and don't need registration.
      *
-     * Config.php may set $configPrepend and $routePrepend to override
-     * the default collision-avoidance prefixes. If not set, defaults
-     * are derived from the package name:
+     * Config.php may return configPrepend and routePrepend keys to
+     * override the default collision-avoidance prefixes. If not set,
+     * defaults are derived from the package name:
      *   - Config: vendor.package-name (e.g. enlivenapp.hello-world-plugin)
      *   - Routes: vendor_package_name (e.g. enlivenapp_hello_world_plugin)
      *
@@ -297,10 +337,11 @@ class PluginLoader
                 $config = $result;
             }
         }
+                     
 
         // Apply defaults if plugin didn't set overrides
-        $configPrepend = $configPrepend ?? $this->deriveConfigPrepend($packageName);
-        $routePrepend = $routePrepend ?? $this->deriveRoutePrepend($packageName);
+        $configPrepend = $config['configPrepend'] ?? $this->deriveConfigPrepend($packageName);
+        $routePrepend = $config['routePrepend'] ?? $this->deriveRoutePrepend($packageName);
 
         // Merge app-level config overrides from plugins array
         $appOverrides = $this->enabledPlugins[$packageName] ?? [];
@@ -364,6 +405,20 @@ class PluginLoader
     protected function deriveRoutePrepend(string $packageName): string
     {
         return str_replace(['/', '-'], '_', $packageName);
+    }
+
+    /**
+     * Get the public route prefix for a loaded plugin.
+     *
+     * @param string $packageName Composer package name (e.g. 'pubvana/blog')
+     * @return string Prefix with leading slash (e.g. '/blog')
+     */
+    public function routePrefix(string $packageName): string
+    {
+        $config = $this->pluginConfigs[$packageName] ?? [];
+        $prefix = $config['routePrepend'] ?? $this->deriveRoutePrepend($packageName);
+
+        return '/' . ltrim($prefix, '/');
     }
 
     /**

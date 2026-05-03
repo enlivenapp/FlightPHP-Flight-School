@@ -1,14 +1,18 @@
-[![Version](http://poser.pugx.org/enlivenapp/flight-school/version)](https://packagist.org/packages/enlivenapp/flight-school)
-[![License](http://poser.pugx.org/enlivenapp/flight-school/license)](https://packagist.org/packages/enlivenapp/flight-school)
-[![Suggesters](http://poser.pugx.org/enlivenapp/flight-school/suggesters)](https://packagist.org/packages/enlivenapp/flight-school)
-[![PHP Version Require](http://poser.pugx.org/enlivenapp/flight-school/require/php)](https://packagist.org/packages/enlivenapp/flight-school)
-[![Monthly Downloads](https://poser.pugx.org/enlivenapp/flight-school/d/monthly)](https://packagist.org/packages/enlivenapp/flight-school)
+[![Stable? Not Quite Yet](https://img.shields.io/badge/stable%3F-not%20quite%20yet-blue?style=for-the-badge)](https://packagist.org/packages/enlivenapp/flight-school)
+[![License](https://img.shields.io/packagist/l/enlivenapp/flight-school?style=for-the-badge)](https://packagist.org/packages/enlivenapp/flight-school)
+[![PHP Version](https://img.shields.io/packagist/php-v/enlivenapp/flight-school?style=for-the-badge)](https://packagist.org/packages/enlivenapp/flight-school)
+[![Monthly Downloads](https://img.shields.io/packagist/dm/enlivenapp/flight-school?style=for-the-badge)](https://packagist.org/packages/enlivenapp/flight-school)
+[![Total Downloads](https://img.shields.io/packagist/dt/enlivenapp/flight-school?style=for-the-badge)](https://packagist.org/packages/enlivenapp/flight-school)
+[![GitHub Issues](https://img.shields.io/github/issues/enlivenapp/FlightPHP-Flight-School?style=for-the-badge)](https://github.com/enlivenapp/FlightPHP-Flight-School/issues)
+[![Contributors](https://img.shields.io/github/contributors/enlivenapp/FlightPHP-Flight-School?style=for-the-badge)](https://github.com/enlivenapp/FlightPHP-Flight-School/graphs/contributors)
+[![Latest Release](https://img.shields.io/github/v/release/enlivenapp/FlightPHP-Flight-School?style=for-the-badge)](https://github.com/enlivenapp/FlightPHP-Flight-School/releases)
+[![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-blue?style=for-the-badge)](https://github.com/enlivenapp/FlightPHP-Flight-School/pulls)
 
 # Flight School
 
 Composer based plugin support for FilghtPHP.
 
-- **Automatic boot order** for plugin files (Config, Routes) with `$app` and `$router` available
+- **Automatic boot order** for plugin files (`Config.php`, `Routes.php`, `AdminRoutes.php`) with `$app` and `$router` available
 - **Auto-prefixed config and routes management** so plugins don't step on each other
 - **Enable/disable** plugins in `app/config/config.php`
 - **Priority-based load ordering** between plugins
@@ -91,14 +95,14 @@ $mailer = new \MyVendor\MyPlugin\Services\Mailer();
 
 
 ### src/Config/Config.php 
-- sets prefixes and returns config values. The PluginLoader stores the returned array on `$app` with the prefix applied, so two plugins can't overwrite each other's config:
+- sets prefixes and returns config values. Put `configPrepend` and `routePrepend` inside the returned array. The PluginLoader stores the returned array on `$app` with the config prefix applied, so two plugins can't overwrite each other's config:
 
 ```php
 <?php
-$configPrepend = 'blog';
-$routePrepend = 'blog';
 
 return [
+    'configPrepend' => 'blog',
+    'routePrepend' => 'blog',
     'posts_per_page' => 15,
 ];
 ```
@@ -117,23 +121,26 @@ Defines routes. The PluginLoader wraps this file in a `$router->group()` using t
 ```php
 <?php
 // src/Config/Config.php
-$routePrepend = 'blog';
-//...
+return [
+    'routePrepend' => 'blog',
+];
 
 $router->get('/', [BlogController::class, 'index']); // ex.com/blog/
 $router->get('/@slug', [BlogController::class, 'show']); // ec.com/blog/@slug 
 
 // src/Config/Config.php
-$routePrepend = '';
-//...
+return [
+    'routePrepend' => '',
+];
 
 $router->get('/', [BlogController::class, 'index']); // ex.com/
 $router->get('/@slug', [BlogController::class, 'show']); // ex.com/@slug
 
 
 // src/Config/Config.php
-// $routePrepend = '';  // commented out
-//...
+return [
+    // 'routePrepend' => '',
+];
 
 $router->get('/', [BlogController::class, 'index']); // ex.com/vendor_package/
 $router->get('/@slug', [BlogController::class, 'show']); // ex.com/vendor_package/@slug
@@ -143,7 +150,7 @@ $router->get('/@slug', [BlogController::class, 'show']); // ex.com/vendor_packag
 
 ### src/Plugin.php (optional) 
 
-If your plugin needs custom setup beyond what Config/ files provide (events, middleware, writing config defaults to app/config/config.php, etc.), create `src/Plugin.php` implementing `PluginInterface`. The loader calls `register()` after the Config/ files are loaded:
+If your plugin needs custom setup beyond what Config/ files provide (events, middleware, adext registration, writing config defaults to app/config/config.php, etc.), create `src/Plugin.php` implementing `PluginInterface`. The loader calls `register()` after the Config/ files are loaded:
 
 ```php
 <?php
@@ -256,7 +263,7 @@ my-plugin/
     Plugin.php              <- optional (for custom setup beyond Config/ files)
     Cache/
     commands/             <- Runway CLI commands (auto-discovered, must be lowercase)
-    Config/               <- loaded automatically (Config.php, Routes.php)
+    Config/               <- loaded automatically (Config.php, Routes.php, AdminRoutes.php)
     Controllers/
     Middlewares/
     Migrations/
@@ -481,11 +488,11 @@ Put your plugin's config and routes in `src/Config/`:
 
 ```
 src/Config/
-  Config.php      <- returns config array, optionally sets prepend overrides
+  Config.php      <- returns config array, optionally includes prepend overrides
   Routes.php      <- defines routes (auto-wrapped in prefix group)
 ```
 
-Only include the files your plugin needs. `$app` and `$router` are available in all of them. `$configPrepend` is available in Routes.php.
+Only include the files your plugin needs. `$app` and `$router` are available in all of them. `$configPrepend` is available in route files.
 
 Publish your package to Packagist like any Composer package. Flight School handles discovery and config entry creation automatically.
 

@@ -83,6 +83,12 @@ class PluginsInfoCommand extends AbstractBaseCommand
         };
     }
 
+    /**
+     * Print the usage/help text for this command.
+     *
+     * @param object $io CLI I/O helper
+     * @return void
+     */
     protected function showUsage($io): void
     {
         $io->write('', true);
@@ -109,6 +115,13 @@ class PluginsInfoCommand extends AbstractBaseCommand
         $io->write('', true);
     }
 
+    /**
+     * Display the composer.json metadata for a plugin.
+     *
+     * @param object $io   CLI I/O helper
+     * @param array  $data Parsed composer.json contents
+     * @return void
+     */
     protected function showComposerInfo($io, array $data): void
     {
         $io->write('', true);
@@ -133,6 +146,15 @@ class PluginsInfoCommand extends AbstractBaseCommand
         $io->write('', true);
     }
 
+    /**
+     * Display route prefix or full route listing for a plugin.
+     *
+     * @param object $io         CLI I/O helper
+     * @param string $plugin     Package name
+     * @param string $pluginRoot Absolute path to the plugin's root directory
+     * @param bool   $showAll    Whether to show all routes or just the prefix
+     * @return void
+     */
     protected function showRoutes($io, string $plugin, string $pluginRoot, bool $showAll): void
     {
         $result = $this->readPrepends($plugin, $pluginRoot);
@@ -176,6 +198,15 @@ class PluginsInfoCommand extends AbstractBaseCommand
         $io->write('', true);
     }
 
+    /**
+     * Display config prefix or full config listing for a plugin.
+     *
+     * @param object $io         CLI I/O helper
+     * @param string $plugin     Package name
+     * @param string $pluginRoot Absolute path to the plugin's root directory
+     * @param bool   $showAll    Whether to show all config items or just the prefix
+     * @return void
+     */
     protected function showConfig($io, string $plugin, string $pluginRoot, bool $showAll): void
     {
         $result = $this->readPrepends($plugin, $pluginRoot);
@@ -205,6 +236,14 @@ class PluginsInfoCommand extends AbstractBaseCommand
         $io->write('', true);
     }
 
+    /**
+     * Recursively print config key/value pairs with indentation.
+     *
+     * @param object $io     CLI I/O helper
+     * @param array  $items  Config items to print
+     * @param string $indent Current indentation prefix
+     * @return void
+     */
     protected function printConfigItems($io, array $items, string $indent): void
     {
         foreach ($items as $key => $value) {
@@ -218,6 +257,14 @@ class PluginsInfoCommand extends AbstractBaseCommand
         }
     }
 
+    /**
+     * List all discoverable classes in a plugin's src/ directory.
+     *
+     * @param object      $io            CLI I/O helper
+     * @param string      $pluginRoot    Absolute path to the plugin's root directory
+     * @param string|null $baseNamespace PSR-4 root namespace from composer.json
+     * @return void
+     */
     protected function showClasses($io, string $pluginRoot, ?string $baseNamespace): void
     {
         $io->write('', true);
@@ -252,6 +299,15 @@ class PluginsInfoCommand extends AbstractBaseCommand
         $io->write('', true);
     }
 
+    /**
+     * Recursively scan a directory for PHP classes and build FQCNs.
+     *
+     * @param string   $dir           Current directory being scanned
+     * @param string   $srcRoot       The plugin's src/ root directory
+     * @param string   $baseNamespace PSR-4 root namespace
+     * @param string[] &$classes      Accumulated fully-qualified class names
+     * @return void
+     */
     protected function scanForClasses(string $dir, string $srcRoot, string $baseNamespace, array &$classes): void
     {
         foreach (glob($dir . '/*') as $path) {
@@ -283,6 +339,13 @@ class PluginsInfoCommand extends AbstractBaseCommand
         }
     }
 
+    /**
+     * List registered path directories in a plugin's src/ folder.
+     *
+     * @param object $io         CLI I/O helper
+     * @param string $pluginRoot Absolute path to the plugin's root directory
+     * @return void
+     */
     protected function showPaths($io, string $pluginRoot): void
     {
         $io->write('', true);
@@ -312,8 +375,8 @@ class PluginsInfoCommand extends AbstractBaseCommand
     /**
      * Read Config.php to get prepend overrides and config data.
      *
-     * Config.php may set $configPrepend and $routePrepend as bare
-     * variables. If not set, defaults are derived from the package name.
+     * Config.php may return configPrepend and routePrepend keys. If
+     * not set, defaults are derived from the package name.
      *
      * @param string $plugin     Package name (e.g. 'enlivenapp/hello-world-plugin').
      * @param string $pluginRoot Absolute path to the plugin's root directory.
@@ -323,9 +386,6 @@ class PluginsInfoCommand extends AbstractBaseCommand
     {
         $configFile = $pluginRoot . '/src/Config/Config.php';
         $data = [];
-        $configPrepend = null;
-        $routePrepend = null;
-
         if (file_exists($configFile)) {
             $result = require $configFile;
             if (is_array($result)) {
@@ -333,9 +393,9 @@ class PluginsInfoCommand extends AbstractBaseCommand
             }
         }
 
-        // Apply defaults if Config.php didn't set overrides
-        $configPrepend = $configPrepend ?? str_replace('/', '.', $plugin);
-        $routePrepend = $routePrepend ?? str_replace(['/', '-'], '_', $plugin);
+        // Apply defaults if Config.php didn't return overrides
+        $configPrepend = $data['configPrepend'] ?? str_replace('/', '.', $plugin);
+        $routePrepend = $data['routePrepend'] ?? str_replace(['/', '-'], '_', $plugin);
 
         return [
             'PluginPrefix' => [
