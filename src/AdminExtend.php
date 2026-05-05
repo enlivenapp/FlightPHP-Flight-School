@@ -78,6 +78,8 @@ class AdminExtend
                             $result['return_url'] = '/admin' . $result['return_url'];
                         }
                         $item = array_merge($item, $result);
+                    } elseif (is_string($result)) {
+                        $item['output'] = $result;
                     }
                 }
             }
